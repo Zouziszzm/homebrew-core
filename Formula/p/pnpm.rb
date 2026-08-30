@@ -1,16 +1,15 @@
 class Pnpm < Formula
   desc "Fast, disk space efficient package manager"
   homepage "https://pnpm.io/"
-  url "https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz"
-  sha256 "d1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f"
+  url "https://github.com/pnpm/pnpm/archive/refs/tags/v12.1.0.tar.gz"
+  sha256 "3e8718d9c38d61ecdb4aca9df3d1257d11fdfbed4d022d8dbc139f511b5aed66"
   license "MIT"
   compatibility_version 1
 
   livecheck do
-    url "https://registry.npmjs.org/pnpm/latest-11"
-    strategy :json do |json|
-      json["version"]
-    end
+    url :stable
+    regex(/^v?(\d+(?:\.\d+)+)$/i)
+    strategy :git
   end
 
   bottle do
@@ -24,35 +23,48 @@ class Pnpm < Formula
     sha256 cellar: :any_skip_relocation, x86_64_linux:  "482adae72a25632a98d8d39e310f5919d99ee485c6550a8feca330771525bdea"
   end
 
-  depends_on "node" => [:build, :test]
+  depends_on "rust" => :build
 
   conflicts_with "corepack", because: "both install `pnpm` and `pnpx` binaries"
 
-  # downloads npm packages during install
+  # cargo fetches crates from crates.io during the build
   allow_network_access! :build
 
   def install
-    system "npm", "install", *std_npm_args
-    bin.install_symlink libexec.glob("bin/*")
+    system "cargo", "install", *std_cargo_args(path: "pnpm/crates/cli")
+
+    # Upstream ships these beside the binary as shell scripts rather than
+    # symlinks: the `dlx` injection for `pnpx`/`pnx` matches on the name of
+    # the resolved `current_exe`, which a symlink would report as `pnpm`.
+    (bin/"pn").write <<~SH
+      #!/bin/sh
+      exec "#{opt_bin}/pnpm" "$@"
+    SH
+    ["pnpx", "pnx"].each do |name|
+      (bin/name).write <<~SH
+        #!/bin/sh
+        exec "#{opt_bin}/pnpm" dlx "$@"
+      SH
+    end
+    chmod 0755, [bin/"pn", bin/"pnpx", bin/"pnx"]
 
     generate_completions_from_executable(bin/"pnpm", "completion")
-
-    # remove non-native architecture pre-built binaries
-    (libexec/"lib/node_modules/pnpm/dist").glob("**/reflink.*.node").each do |f|
-      next if f.arch == Hardware::CPU.arch
-
-      rm f
-    end
   end
 
   def caveats
     <<~EOS
-      pnpm requires a Node installation to function. You can install one with:
+      pnpm requires a Node installation to run package scripts. You can install
+      one with:
         brew install node
     EOS
   end
 
   test do
+    # `pnpm init` writes a `packageManager` pin naming this exact pnpm, and
+    # every later invocation resolves that pin against the registry, so
+    # anything that must run without network has to come first.
+    assert_match version.to_s, shell_output("#{bin}/pn --version")
+
     system bin/"pnpm", "init"
     assert_path_exists testpath/"package.json", "package.json must exist"
   end
