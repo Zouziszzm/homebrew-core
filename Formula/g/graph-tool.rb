@@ -50,6 +50,7 @@ class GraphTool < Formula
   end
 
   on_linux do
+    depends_on "mold" => :build
     depends_on "gcc"
   end
 
@@ -95,7 +96,10 @@ class GraphTool < Formula
     # > Enforce -O3. It makes a substantial difference, e.g. 12x speed improvement over -O2 in benchmarks.
     ENV.O3
 
+    ENV.append_to_cflags "-fuse-ld=mold" if OS.linux?
+
     args = %W[
+      MOD_CXXFLAGS=-flto
       PYTHON=#{which(python3)}
       --with-python-module-path=#{prefix/Language::Python.site_packages(python3)}
       --with-boost-python=boost_#{python3.delete(".")}
@@ -104,7 +108,6 @@ class GraphTool < Formula
       --disable-silent-rules
     ]
     args << "PYTHON_LIBS=-undefined dynamic_lookup" if OS.mac?
-    args << "MOD_CXXFLAGS=-flto" if OS.linux?
 
     system "./configure", *args, *std_configure_args
     system "make", "install"
